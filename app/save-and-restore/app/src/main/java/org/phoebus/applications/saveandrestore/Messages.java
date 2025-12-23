@@ -79,6 +79,7 @@ public class Messages {
     public static String duplicatePVNamesAdditionalItems;
     public static String duplicatePVNamesCheckFailed;
     public static String duplicatePVNamesFoundInSelection;
+    public static String duplicatePVNamesNotSupported;
     public static String Edit;
     public static String editFilter;
     public static String errorActionFailed;
@@ -94,6 +95,7 @@ public class Messages {
     public static String exportSnapshotFailed;
     public static String failedDeleteFilter;
     public static String failedGetFilters;
+    public static String failedGetSpecificFilter;
     public static String failedSaveFilter;
     public static String failedToPasteObjects;
     public static String filterNotFound;

@@ -108,6 +108,7 @@ public class SnapshotController extends SaveAndRestoreBaseController {
         snapshotProperty.addListener((ob, o, n) -> {
             if (n != null) {
                 snapshotControlsViewController.setSnapshotNode(n.getSnapshotNode());
+                snapshotTableViewController.showSnapshotInTable(n);
             }
         });
     }
@@ -150,6 +151,7 @@ public class SnapshotController extends SaveAndRestoreBaseController {
             disabledUi.set(false);
             if (snapshot.isPresent()) {
                 snapshotProperty.set(snapshot.get());
+                snapshotTableViewController.showSnapshotInTable(snapshot.get());
             }
         });
     }
@@ -336,7 +338,7 @@ public class SnapshotController extends SaveAndRestoreBaseController {
                 Snapshot snapshot = getSnapshotFromService(snapshotNode);
                 snapshotProperty.set(snapshot);
                 Platform.runLater(() -> {
-                    snapshotTableViewController.showSnapshotInTable(snapshot);
+                    //snapshotTableViewController.showSnapshotInTable(snapshot);
                     snapshotControlsViewController.getSnapshotRestorableProperty().set(true);
                 });
             } finally {
@@ -359,27 +361,32 @@ public class SnapshotController extends SaveAndRestoreBaseController {
     }
 
     public void restore(ActionEvent actionEvent) {
-        snapshotTableViewController.restoreSnapshot(snapshotControlsViewController.getRestoreMode(), snapshotProperty.get(), restoreResultList -> {
+        snapshotTableViewController.restore(snapshotControlsViewController.getRestoreMode(), snapshotProperty.get(), restoreResultList -> {
             if (snapshotControlsViewController.logAction()) {
                 eventReceivers.forEach(r -> r.snapshotRestored(snapshotProperty.get().getSnapshotNode(), restoreResultList, this::showLoggingError));
             }
             if (restoreResultList != null && !restoreResultList.isEmpty()) {
-                showFailedRestoreResult(restoreResultList);
+                showAndLogFailedRestoreResult(snapshotProperty.get(), restoreResultList);
+            }
+            else{
+                LOGGER.log(Level.INFO, "Successfully restored snapshot \"" + snapshotProperty.get().getSnapshotNode().getName() + "\"");
             }
         });
     }
 
-    private void showFailedRestoreResult(List<RestoreResult> restoreResultList) {
+    private void showAndLogFailedRestoreResult(Snapshot snapshot, List<RestoreResult> restoreResultList) {
         StringBuilder stringBuilder = new StringBuilder();
-        stringBuilder.append(Messages.restoreFailedPVs).append(System.lineSeparator());
         stringBuilder.append(restoreResultList.stream()
                 .map(r -> r.getSnapshotItem().getConfigPv().getPvName()).collect(Collectors.joining(System.lineSeparator())));
         Platform.runLater(() -> {
             Alert alert = new Alert(Alert.AlertType.ERROR);
-            alert.setTitle(Messages.restoreFailed);
+            alert.setTitle(Messages.restoreFailedPVs);
             alert.setContentText(stringBuilder.toString());
             alert.show();
         });
+        LOGGER.log(Level.WARNING,
+                "Not all PVs could be restored for {0}: {1}. The following errors occurred:\n{2}",
+                new Object[]{snapshot.getSnapshotNode().getName(), snapshot.getSnapshotNode(), stringBuilder.toString()});
     }
 
     /**

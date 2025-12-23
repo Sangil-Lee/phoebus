@@ -20,7 +20,7 @@ Server-side IOC communication
 The service exposes endpoints for reading and writing PVs, i.e. to create or restore snapshots. Depending on the
 setup this server-side IOC communication may need some configuration:
 
-For ca (channel access) the service must be started with the ``-Dca.use_env=true`` Java option, and the list of
+For ca (channel access) the service must be started with the ``-Djca.use_env=true`` Java option, and the list of
 gateways - if any - must be set as a system environment named ``EPICS_CA_ADDR_LIST``.
 
 For pva (pv access) the service must be started with the ``-DdefaultProtocol=pva`` Java option, and the list of
@@ -126,6 +126,20 @@ Nodes of type CONFIGURATION and SNAPSHOT will also have a ``description`` field.
 A special case is the root node as it has a fixed unique id:
 
 **.../node/44bef5de-e8e6-4014-af37-b8f6c8a939a2**
+
+Retrieve multiple nodes
+"""""""""""""""""""""""
+Method: GET
+
+Body:
+
+.. code-block:: JSON
+
+   ["nodeId-1", "nodeId-2",..., "nodeId-N"]
+
+Return:
+Details of the nodes listed as unique node ids in the request body.
+
 
 Create a new node
 """""""""""""""""
@@ -251,6 +265,8 @@ The a list of all the children nodes of the node with id `{uniqueNodeId}`
         }
     ]
 
+.. _Get a configuration:
+
 Get a configuration
 """""""""""""""""""
 
@@ -281,7 +297,11 @@ Return: object describing the configuration data, essentially a list of PVs.
                     "pvName": "13SIM1:{SimDetector-Cam:1}cam1:BinX"
                 },
                 {
-                    "pvName": "13SIM1:{SimDetector-Cam:1}cam1:BinY"
+                    "pvName": "13SIM1:{SimDetector-Cam:1}cam1:BinY",
+                    "comparison":{
+                        "comparisonMode":"ABSOLUTE",
+                        "tolerance":2.7
+                    }
                 },
                 {
                     "pvName": "13SIM1:{SimDetector-Cam:2}cam2:BinX",
@@ -298,6 +318,8 @@ Return: object describing the configuration data, essentially a list of PVs.
     }
 
 Here the ``uniqueId`` field matches the ``unqiueId`` field of the configuration node.
+
+The ``comparison`` field is optional and can be set individually on each element in the list.
 
 Create a configuration
 """"""""""""""""""""""
@@ -332,7 +354,11 @@ Body:
                     {
                         "pvName": "13SIM1:{SimDetector-Cam:2}cam2:BinX",
                         "readbackPvName": null,
-                        "readOnly": false
+                        "readOnly": false,
+                        "comparison": {
+                            "comparisonMode":"ABSOLUTE",
+                            "tolerance": 2.7
+                        }
                     },
                     {
                         "pvName": "13SIM1:{SimDetector-Cam:2}cam2:BinY",
@@ -346,6 +372,9 @@ Body:
 
 The request parameter ``parentNodeId`` is mandatory and must identify an existing folder node. The client
 needs to specify a name for the new configuration node, as well as a user identity.
+
+The ``comparison`` field is optional and can be set individually on each element in the list. If specified,
+the ``comparisonMode`` must be either "ABSOLUTE" or "RELATIVE", and the ``tolerance`` must be >=0.
 
 Update a configuration
 """"""""""""""""""""""
@@ -365,6 +394,8 @@ body will be removed.
 
 Snapshot Endpoints
 ------------------
+
+.. _Get a snapshot:
 
 Get a snapshot
 """"""""""""""
@@ -626,7 +657,7 @@ body will be removed.
 Get restorable items of a composite snapshot
 """"""""""""""""""""""""""""""""""""""""""""
 
-***.../composite-snapshot/{uniqueId}/items**
+**.../composite-snapshot/{uniqueId}/items**
 
 Method: GET
 
@@ -745,6 +776,54 @@ Body:
       }
     ]
 
+Server Take Snapshot Endpoints
+------------------------------
+
+**.../take-snapshot/{configNodeId}**
+
+Method: GET
+
+This will read PV values for all items listed in the configuration identified by ``configNodeId``. Upon successful
+completion, the response will hold an array of objects where each element is on the form:
+
+.. code-block:: JSON
+
+    {
+        "configPv": {
+          "pvName": "RFQ-010:RFS-EVR-101:RFSyncWdt-SP",
+          "readbackPvName": null,
+          "readOnly": false
+        },
+        "value": {
+          "type": {
+            "name": "VDouble",
+            "version": 1
+          },
+          "value": 100.0,
+          "alarm": {
+            "severity": "NONE",
+            "status": "NONE",
+            "name": "NONE"
+          },
+          "time": {
+            "unixSec": 1639063122,
+            "nanoSec": 320431469
+          },
+          "display": {
+            "units": ""
+          }
+    }
+
+**.../take-snapshot/{configNodeId}<?name=snapshotName&comment=snapshotComment>**
+
+Method: PUT
+
+This will read PV values for all items listed in the configuration identified by ``configNodeId``. Upon successful
+completion the data is persisted into the database. ``name`` and ``comment`` are optional query parameters and will
+default to the current date/time on the format ``yyyy-MM-dd HH:mm:ss.SSS``.
+
+The response is a snapshot object representing the persisted data, see :ref:`Get a snapshot`
+
 Server Restore Endpoints
 ------------------------
 
@@ -844,20 +923,39 @@ from an existing node rather than providing them explicitly. It returns the same
 Compare Endpoint
 ----------------
 
-**.../compare/{uniqueId}[?tolerance=<tolerance_value>]**
+**.../compare/{uniqueId}[?tolerance=<tolerance_value>&compareMode=<ABSOLUTE|RELATIVE>&skipReadback=<true|false>]**
 
 Method: GET
 
-The path variable ``{uniqueId}`` must identify an existing snapshot or composite snapshot. The ``tolerance`` query parameter is
-optional and defaults to zero. If specified it must be >= 0.
+The path variable ``{uniqueId}`` must identify an existing snapshot or composite snapshot.
 
-This endpoint can be used to compare stored snapshot values to live values for each set-point PV in the snapshot.
-Comparisons are performed in the same manner as in the client UI, i.e.:
+The ``tolerance`` query parameter is optional and defaults to zero. If specified it must be >= 0. Non-numeric values
+will trigger a HTTP 400 response.
 
-* Scalar PVs are compared using the the optional relative tolerance, or compared using zero tolerance.
+The ``compareMode`` query parameter is optional and defaults to ``ABSOLUTE``. This is case sensitive, values other
+than ``ABSOLUTE`` or ``RELATIVE`` will trigger a HTTP 400 response.
+
+The ``skipReadback`` query parameter is optional and defaults to ``false``. This is case insensitive, values
+that cannot be evaluated as boolean will trigger a HTTP 400 response.
+
+This endpoint can be used to compare stored snapshot values to live values for each set-point PV in the snapshot. The
+reference value for the comparison is always the one corresponding to the ``PV Name`` column in the configuration.
+
+Comparisons are performed like so:
+
+* Scalar PVs are compared using the tolerance and compare mode (absolute or relative), or compared using zero tolerance.
 * Array PVs are compared element wise, always using zero tolerance. Arrays must be of equal length.
 * Table PVs are compared element wise, always using zero tolerance. Tables must be of same dimensions, and data types must match between columns.
 * Enum PVs are compared using zero tolerance.
+
+The ``compareMode`` and ``tolerance`` are applied to all comparison operations, but can be overridden on each individual
+item in a configuration, see :ref:`Get a configuration`.
+
+Equality between a stored value and the live value is determined on each PV like so:
+
+* If the configuration of a PV does not specify a comparison mode and tolerance, the ``comparisonMode`` and ``tolerance`` request parameters are used. These however are optional and default to ABSOLUTE and zero respectively.
+* The base (reference) value is always the value stored in the value field of a snapshot item object. It corresponds to the ``pvName``` field, i.e. never the ``readbackPvName`` of a configuration item.
+* The live value used in the comparison is either the value corresponding to ``pvName``, or ``readbackPvName`` if specified. The latter can be overridden with the ``skipReadback`` request parameter.
 
 Return value: a list of comparison results, one for each PV in the snapshot, e.g.:
 
